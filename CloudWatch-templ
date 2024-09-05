@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create a honeypot environment with email alerts
+
+Parameters:
+  InstanceType:
+    Description: EC2 Instance type (Choose t2.micro for Free Tier)
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+    ConstraintDescription: must be a valid EC2 instance type.
+
+  SSHKeyName:
+    Description: Enter your EC2 KeyPair for SSH access
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  
+  VpcId:
+    Description: Select the VPC where the honeypot will be launched
+    Type: AWS::EC2::VPC::Id
+  
+  SubnetId:
+    Description: Select the Subnet for the EC2 instance
+    Type: AWS::EC2::Subnet::Id
+  
+  PublicIp:
+    Description: Do you want to assign a public IP to the honeypot instance?
+    Type: String
+    AllowedValues:
+      - Yes
+      - No
+    Default: Yes
+
+  AlertEmail:
+    Description: Enter the email address to receive alerts
+    Type: String
+
+Resources:
+  HoneypotInstance:
+    Type: AWS::EC2::Instance
+    Properties: 
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref SSHKeyName
+      SubnetId: !Ref SubnetId
+      ImageId: ami-0a91cd140a1fc148a  # Ubuntu 20.04 LTS
+      SecurityGroupIds: [!Ref HoneypotSecurityGroup]
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: !If [IsPublic, true, false]
+          DeviceIndex: 0
+          SubnetId: !Ref SubnetId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install postfix mailutils -y
+          echo "postfix postfix/mailname string localhost" | debconf-set-selections
+          echo "postfix postfix/main_mailer_type string 'Internet Site'" | debconf-set-selections
+          systemctl restart postfix
+          echo "Alert testing" | mail -s "Test Email" ${AlertEmail}
+
+          # Install Cowrie honeypot
+          apt-get install git python3-virtualenv -y
+          git clone https://github.com/cowrie/cowrie.git /opt/cowrie
+          cd /opt/cowrie
+          virtualenv --python=python3 cowrie-env
+          source cowrie-env/bin/activate
+          pip install -r requirements.txt
+          ./bin/cowrie start
+
+          # Set up CloudWatch Logs to monitor honeypot activity
+          apt-get install awscli -y
+          aws logs create-log-group --log-group-name /aws/honeypot/cowrie
+          aws logs create-log-stream --log-group-name /aws/honeypot/cowrie --log-stream-name cowrie-log-stream
+          ./bin/cowrie stop
+          ./bin/cowrie start
+
+  HoneypotSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH and trap ports for honeypot
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0  # Allow SSH access
+        - IpProtocol: tcp
+          FromPort: 23
+          ToPort: 23
+          CidrIp: 0.0.0.0/0  # Allow Telnet
+        - IpProtocol: tcp
+          FromPort: 2222
+          ToPort: 2222
+          CidrIp: 0.0.0.0/0  # Cowrie SSH honeypot port
+
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: !Ref AlertEmail
+          Protocol: email
+
+  HoneypotAlert:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Trigger alert on honeypot activity"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '300'
+      EvaluationPeriods: '1'
+      Threshold: '80'  # Adjust this based on activity levels
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      AlarmActions:
+        - !Ref SNSTopic
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref HoneypotInstance
+
+Outputs:
+  InstanceId:
+    Description: Instance ID of the honeypot
+    Value: !Ref HoneypotInstance
+
+  PublicIP:
+    Description: Public IP of the instance (if enabled)
+    Value: !GetAtt [HoneypotInstance, PublicIp]
+
+Conditions:
+  IsPublic: !Equals [!Ref PublicIp, Yes]
