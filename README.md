@@ -1,4 +1,4 @@
-# HoneyPot-AWS
+HoneyPot-AWS
 AWS CloudFormation script and instructions template to setup a honeypot 
 The script provisions EC2 instance running Ubuntu and honeypot using Cowrie
 
@@ -19,23 +19,23 @@ Connect to the EC2 instance via SSH using the key pair such as ssh -i /path/to/k
 # Update the instance
 sudo apt update && sudo apt upgrade -y
 
-# Install dependencies
+Install dependencies
 sudo apt install git python3-virtualenv libssl-dev libffi-dev build-essential python3-dev libpython3-dev -y
 
-# Clone the Cowrie repository
+Clone the Cowrie repository
 git clone https://github.com/cowrie/cowrie.git
 
-# Navigate to Cowrie folder
+Navigate to Cowrie folder
 cd cowrie
 
-# Set up a virtual environment for Cowrie
+Set up a virtual environment for Cowrie
 virtualenv --python=python3 cowrie-env
 source cowrie-env/bin/activate
 
-# Install Python dependencies
+Install Python dependencies
 pip install -r requirements.txt
 
-# Start Cowrie
+Start Cowrie
 ./bin/cowrie start
 
 2- Monitor the Honeypot:
