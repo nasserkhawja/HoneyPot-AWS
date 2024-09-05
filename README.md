@@ -16,7 +16,7 @@ Connect to the EC2 instance via SSH using the key pair such as ssh -i /path/to/k
 
 
 1- Install Cowrie:
-# Update the instance
+Update the instance
 sudo apt update && sudo apt upgrade -y
 
 Install dependencies
